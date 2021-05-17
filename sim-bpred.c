@@ -184,7 +184,13 @@ sim_reg_options(struct opt_odb_t *odb)
 		   /* default */btb_config,
 		   /* print */TRUE, /* format */NULL, /* !accrue */FALSE);
 
-  opt_reg_int_list(odb, "-bpred:hash",
+  opt_reg_int_list(odb, "-bpred:hash_01",
+       "hash config (hash table size)",
+       hash_config, hash_nelt, &hash_nelt,
+       /* default */hash_config,
+       /* print */TRUE, /* format */NULL, /* !accrue */FALSE);
+
+  opt_reg_int_list(odb, "-bpred:hash_sign",
        "hash config (hash table size)",
        hash_config, hash_nelt, &hash_nelt,
        /* default */hash_config,
@@ -271,6 +277,14 @@ sim_check_options(struct opt_odb_t *odb, int argc, char **argv)
     if (hash_nelt != 1)
       fatal("bad hash pred config (hash table size)");
     pred  = bpred_create(BPredHash01,
+      hash_config[0],
+      0,0,0,0,0,0,0,0);
+  }
+  else if (!mystricmp(pred_type, "hashsign"))
+  {
+    if (hash_nelt != 1)
+      fatal("bad hash pred config (hash table size)");
+    pred  = bpred_create(BPredHashSign,
       hash_config[0],
       0,0,0,0,0,0,0,0);
   }

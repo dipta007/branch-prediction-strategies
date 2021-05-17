@@ -119,6 +119,12 @@ bpred_create(enum bpred_class class,     /* type of predictor to create */
       bpred_dir_create(class, bimod_size, 0, 0, 0);
     break;
 
+  /* Add new case: BPredHash */
+  case BPredHashSign:
+    pred->dirpred.hash = 
+      bpred_dir_create(class, bimod_size, 0, 0, 0);
+    break;
+
   default:
     panic("bogus predictor class");
   }
@@ -178,6 +184,14 @@ bpred_create(enum bpred_class class,     /* type of predictor to create */
 
   /* Add new case */
   case BPredHash01:
+    if (!bimod_size || (bimod_size & (bimod_size-1)) != 0)
+      fatal("number of hash table must be non-zero and a power of two");
+    pred->btb.sets = bimod_size;
+    if (!(pred->btb.btb_data = calloc(bimod_size, sizeof(struct bpred_btb_ent_t))))
+      fatal("cannot allocate BTB");
+    break;
+
+  case BPredHashSign:
     if (!bimod_size || (bimod_size & (bimod_size-1)) != 0)
       fatal("number of hash table must be non-zero and a power of two");
     pred->btb.sets = bimod_size;
@@ -280,6 +294,17 @@ bpred_dir_create(
 
     break;
 
+  case BPredHashSign:
+    if (!l1size || (l1size & (l1size-1)) != 0) {
+      fatal("table size must be non zero and a power of 2");
+    }
+    pred_dir->config.ha.hasize = l1size;
+    if (!(pred_dir->config.ha.hatable = calloc(l1size, sizeof(int)))) {
+      fatal("cannot allocate hash size table");
+    }  
+
+    break;
+
   case BPredTaken:
   case BPredNotTaken:
     /* no other state */
@@ -321,6 +346,10 @@ void bpred_dir_config(
     break;
 
   case BPredHash01:
+    fprintf(stream, "pred_dir: %s: predict with %d entries\n", name, pred_dir->config.ha.hasize);
+    break;
+  
+  case BPredHashSign:
     fprintf(stream, "pred_dir: %s: predict with %d entries\n", name, pred_dir->config.ha.hasize);
     break;
 
@@ -368,6 +397,10 @@ void bpred_config(struct bpred_t *pred, /* branch predictor instance */
   case BPredHash01:
     bpred_dir_config (pred->dirpred.hash, "hash", stream);
     break;
+  
+  case BPredHashSign:
+    bpred_dir_config (pred->dirpred.hash, "hash", stream);
+    break;
 
   default:
     panic("bogus branch predictor class");
@@ -411,6 +444,10 @@ void bpred_reg_stats(struct bpred_t *pred,   /* branch predictor instance */
   
   case BPredHash01:
     name = "bpred_hash_01";
+    break;
+  
+  case BPredHashSign:
+    name = "bpred_hash_Sign";
     break;
 
   default:
@@ -582,6 +619,12 @@ bpred_dir_lookup(struct bpred_dir_t *pred_dir, /* branch dir predictor inst */
     hash_addr = HASH_01(baddr, pred_dir->config.ha.hasize);
     p = &pred_dir->config.ha.hatable[hash_addr];
     break;
+
+  case BPredHashSign:
+    hash_addr = HASH_01(baddr, pred_dir->config.ha.hasize);
+    p = &pred_dir->config.ha.hatable[hash_addr];
+    break;
+  
   default:
     panic("bogus branch direction predictor class");
   }
@@ -680,6 +723,13 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
       dir_update_ptr->pdir1 = bpred_dir_lookup(pred->dirpred.hash, baddr);
     }
     break;
+
+  case BPredHashSign:
+    if ((MD_OP_FLAGS(op) & (F_CTRL|F_UNCOND)) != (F_CTRL|F_UNCOND)) {
+      dir_update_ptr->pdir1 = bpred_dir_lookup(pred->dirpred.hash, baddr);
+    }
+    break;
+
   default:
     panic("bogus predictor class");
   }
@@ -719,7 +769,7 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
 #endif /* !RAS_BUG_COMPATIBLE */
 
   /* New condition for hash class*/
-  if (pred->class == BPredHash01){
+  if (pred->class == BPredHash01 || pred->class == BPredHashSign){
     index = (baddr ^ (pred->btb.sets - 1)) & (pred->btb.sets - 1);
     /* look for a PC match*/
     if (pred->btb.btb_data[index].addr == baddr) {
@@ -769,7 +819,7 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
   /* otherwise we have a conditional branch */
   if (pbtb == NULL)
   {
-    if (pred->class == BPredHash01) {
+    if (pred->class == BPredHash01 || pred->class == BPredHashSign) {
       return ((*(dir_update_ptr->pdir1) > 0)
                 ? /* taken */ 1
                 : /* not taken */ 0);
@@ -781,7 +831,7 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
   }
   else
   {
-    if (pred->class == BPredHash01) {
+    if (pred->class == BPredHash01 || pred->class == BPredHashSign) {
       return ((*(dir_update_ptr->pdir1) > 0)
                 ? /* taken */ pbtb->target
                 : /* not taken */ 0);
@@ -919,7 +969,7 @@ void bpred_update(struct bpred_t *pred,                  /* branch predictor ins
   if (taken)
   {
     /* for hash case*/
-    if (pred->class == BPredHash01) {
+    if (pred->class == BPredHash01 || pred->class == BPredHashSign) {
       index = (baddr ^ (pred->btb.sets - 1)) & (pred->btb.sets - 1);
       pbtb = &pred->btb.btb_data[index];
     } else {
@@ -996,6 +1046,12 @@ void bpred_update(struct bpred_t *pred,                  /* branch predictor ins
   {
     if (pred->class == BPredHash01) {
       *dir_update_ptr->pdir1 = taken;
+    } else if (pred->class == BPredHashSign) {
+      if (taken) {
+        ++*dir_update_ptr->pdir1;
+      } else {
+        --*dir_update_ptr->pdir1;
+      }
     } else {
       if (taken)
       {
