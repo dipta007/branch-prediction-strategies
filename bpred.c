@@ -720,7 +720,7 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
 
   /* New condition for hash class*/
   if (pred->class == BPredHash01){
-    index = (baddr ^ (pred->btb.sets - 1)) &(pred->btb.sets - 1);
+    index = (baddr ^ (pred->btb.sets - 1)) & (pred->btb.sets - 1);
     /* look for a PC match*/
     if (pred->btb.btb_data[index].addr == baddr) {
       /* match */
@@ -769,6 +769,11 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
   /* otherwise we have a conditional branch */
   if (pbtb == NULL)
   {
+    if (pred->class == BPredHash01) {
+      return ((*(dir_update_ptr->pdir1) > 0)
+                ? /* taken */ 1
+                : /* not taken */ 0);
+    }
     /* BTB miss -- just return a predicted direction */
     return ((*(dir_update_ptr->pdir1) >= 2)
                 ? /* taken */ 1
@@ -776,6 +781,11 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
   }
   else
   {
+    if (pred->class == BPredHash01) {
+      return ((*(dir_update_ptr->pdir1) > 0)
+                ? /* taken */ pbtb->target
+                : /* not taken */ 0);
+    }
     /* BTB hit, so return target if it's a predicted-taken branch */
     return ((*(dir_update_ptr->pdir1) >= 2)
                 ? /* taken */ pbtb->target
@@ -984,15 +994,19 @@ void bpred_update(struct bpred_t *pred,                  /* branch predictor ins
   /* update state (but not for jumps) */
   if (dir_update_ptr->pdir1)
   {
-    if (taken)
-    {
-      if (*dir_update_ptr->pdir1 < 3)
-        ++*dir_update_ptr->pdir1;
-    }
-    else
-    { /* not taken */
-      if (*dir_update_ptr->pdir1 > 0)
-        --*dir_update_ptr->pdir1;
+    if (pred->class == BPredHash01) {
+      *dir_update_ptr->pdir1 = taken;
+    } else {
+      if (taken)
+      {
+        if (*dir_update_ptr->pdir1 < 3)
+          ++*dir_update_ptr->pdir1;
+      }
+      else
+      { /* not taken */
+        if (*dir_update_ptr->pdir1 > 0)
+          --*dir_update_ptr->pdir1;
+      }
     }
   }
 
