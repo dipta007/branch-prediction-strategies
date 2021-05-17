@@ -115,12 +115,8 @@ bpred_create(enum bpred_class class,     /* type of predictor to create */
   
   /* Add new case: BPredHash */
   case BPredHash01:
-    pred->dirpred.hash = 
-      bpred_dir_create(class, bimod_size, 0, 0, 0);
-    break;
-
-  /* Add new case: BPredHash */
   case BPredHashSign:
+  case BPredHashSMS:
     pred->dirpred.hash = 
       bpred_dir_create(class, bimod_size, 0, 0, 0);
     break;
@@ -184,14 +180,8 @@ bpred_create(enum bpred_class class,     /* type of predictor to create */
 
   /* Add new case */
   case BPredHash01:
-    if (!bimod_size || (bimod_size & (bimod_size-1)) != 0)
-      fatal("number of hash table must be non-zero and a power of two");
-    pred->btb.sets = bimod_size;
-    if (!(pred->btb.btb_data = calloc(bimod_size, sizeof(struct bpred_btb_ent_t))))
-      fatal("cannot allocate BTB");
-    break;
-
   case BPredHashSign:
+  case BPredHashSMS:
     if (!bimod_size || (bimod_size & (bimod_size-1)) != 0)
       fatal("number of hash table must be non-zero and a power of two");
     pred->btb.sets = bimod_size;
@@ -284,17 +274,8 @@ bpred_dir_create(
 
   /* Add Hash case*/
   case BPredHash01:
-    if (!l1size || (l1size & (l1size-1)) != 0) {
-      fatal("table size must be non zero and a power of 2");
-    }
-    pred_dir->config.ha.hasize = l1size;
-    if (!(pred_dir->config.ha.hatable = calloc(l1size, sizeof(int)))) {
-      fatal("cannot allocate hash size table");
-    }  
-
-    break;
-
   case BPredHashSign:
+  case BPredHashSMS:
     if (!l1size || (l1size & (l1size-1)) != 0) {
       fatal("table size must be non zero and a power of 2");
     }
@@ -346,10 +327,8 @@ void bpred_dir_config(
     break;
 
   case BPredHash01:
-    fprintf(stream, "pred_dir: %s: predict with %d entries\n", name, pred_dir->config.ha.hasize);
-    break;
-  
   case BPredHashSign:
+  case BPredHashSMS:
     fprintf(stream, "pred_dir: %s: predict with %d entries\n", name, pred_dir->config.ha.hasize);
     break;
 
@@ -395,10 +374,8 @@ void bpred_config(struct bpred_t *pred, /* branch predictor instance */
     break;
 
   case BPredHash01:
-    bpred_dir_config (pred->dirpred.hash, "hash", stream);
-    break;
-  
   case BPredHashSign:
+  case BPredHashSMS:
     bpred_dir_config (pred->dirpred.hash, "hash", stream);
     break;
 
@@ -448,6 +425,10 @@ void bpred_reg_stats(struct bpred_t *pred,   /* branch predictor instance */
   
   case BPredHashSign:
     name = "bpred_hash_Sign";
+    break;
+
+  case BPredHashSMS:
+    name = "bpred_hash_SMS";
     break;
 
   default:
@@ -563,8 +544,20 @@ void bpred_after_priming(struct bpred_t *bpred)
   ((((ADDR) >> 19) ^ ((ADDR) >> MD_BR_SHIFT)) & ((PRED)->config.bimod.size - 1))
 /* was: ((baddr >> 16) ^ baddr) & (pred->dirpred.bimod.size-1) */
 
+
+#define HASH_M 16
+
+#define LAST_N_BITS(ADDR) \
+  ADDR & ~(~0U << HASH_M)
+
+#define FIRST_N_BITS(ADDR) \
+  (ADDR & (~0U << (32-HASH_M))) >> (32-HASH_M)
+
 #define HASH_01(ADDR, SIZE) \
-  ((ADDR >> MD_BR_SHIFT) ^ (SIZE - 1)) & (SIZE - 1)
+  (LAST_N_BITS(ADDR) ^ (SIZE - 1)) & (SIZE - 1)
+
+#define IMPROVED_HASH(ADDR, SIZE) \
+  ((FIRST_N_BITS(ADDR) ^ LAST_N_BITS(ADDR)) ^ (SIZE - 1)) & (SIZE - 1)
 
 /* predicts a branch direction */
 char *                                         /* pointer to counter */
@@ -622,6 +615,11 @@ bpred_dir_lookup(struct bpred_dir_t *pred_dir, /* branch dir predictor inst */
 
   case BPredHashSign:
     hash_addr = HASH_01(baddr, pred_dir->config.ha.hasize);
+    p = &pred_dir->config.ha.hatable[hash_addr];
+    break;
+
+  case BPredHashSMS:
+    hash_addr = IMPROVED_HASH(baddr, pred_dir->config.ha.hasize);
     p = &pred_dir->config.ha.hatable[hash_addr];
     break;
   
@@ -719,12 +717,8 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
     }
   /* Add new case*/
   case BPredHash01:
-    if ((MD_OP_FLAGS(op) & (F_CTRL|F_UNCOND)) != (F_CTRL|F_UNCOND)) {
-      dir_update_ptr->pdir1 = bpred_dir_lookup(pred->dirpred.hash, baddr);
-    }
-    break;
-
   case BPredHashSign:
+  case BPredHashSMS:
     if ((MD_OP_FLAGS(op) & (F_CTRL|F_UNCOND)) != (F_CTRL|F_UNCOND)) {
       dir_update_ptr->pdir1 = bpred_dir_lookup(pred->dirpred.hash, baddr);
     }
@@ -769,7 +763,7 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
 #endif /* !RAS_BUG_COMPATIBLE */
 
   /* New condition for hash class*/
-  if (pred->class == BPredHash01 || pred->class == BPredHashSign){
+  if (pred->class == BPredHash01 || pred->class == BPredHashSign || pred->class == BPredHashSMS){
     index = (baddr ^ (pred->btb.sets - 1)) & (pred->btb.sets - 1);
     /* look for a PC match*/
     if (pred->btb.btb_data[index].addr == baddr) {
@@ -819,7 +813,7 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
   /* otherwise we have a conditional branch */
   if (pbtb == NULL)
   {
-    if (pred->class == BPredHash01 || pred->class == BPredHashSign) {
+    if (pred->class == BPredHash01 || pred->class == BPredHashSign || pred->class == BPredHashSMS) {
       return ((*(dir_update_ptr->pdir1) > 0)
                 ? /* taken */ 1
                 : /* not taken */ 0);
@@ -831,7 +825,7 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
   }
   else
   {
-    if (pred->class == BPredHash01 || pred->class == BPredHashSign) {
+    if (pred->class == BPredHash01 || pred->class == BPredHashSign || pred->class == BPredHashSMS) {
       return ((*(dir_update_ptr->pdir1) > 0)
                 ? /* taken */ pbtb->target
                 : /* not taken */ 0);
@@ -969,7 +963,7 @@ void bpred_update(struct bpred_t *pred,                  /* branch predictor ins
   if (taken)
   {
     /* for hash case*/
-    if (pred->class == BPredHash01 || pred->class == BPredHashSign) {
+    if (pred->class == BPredHash01 || pred->class == BPredHashSign || pred->class == BPredHashSMS) {
       index = (baddr ^ (pred->btb.sets - 1)) & (pred->btb.sets - 1);
       pbtb = &pred->btb.btb_data[index];
     } else {
@@ -1046,7 +1040,7 @@ void bpred_update(struct bpred_t *pred,                  /* branch predictor ins
   {
     if (pred->class == BPredHash01) {
       *dir_update_ptr->pdir1 = taken;
-    } else if (pred->class == BPredHashSign) {
+    } else if (pred->class == BPredHashSign || pred->class == BPredHashSMS) {
       if (taken) {
         ++*dir_update_ptr->pdir1;
       } else {

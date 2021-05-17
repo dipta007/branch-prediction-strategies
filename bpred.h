@@ -106,6 +106,7 @@ enum bpred_class
   BPredNotTaken,  /* static predict not taken */
   BPredHash01,    /* hash predictor 0/1 - Strategy 6*/
   BPredHashSign,  /* hash predictor Sign Bit - Strategy 7*/
+  BPredHashSMS,   /* hash predictor SMS - Novel Strategy */
   BPred_NUM,
 };
 

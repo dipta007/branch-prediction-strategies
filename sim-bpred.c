@@ -195,6 +195,12 @@ sim_reg_options(struct opt_odb_t *odb)
        hash_config, hash_nelt, &hash_nelt,
        /* default */hash_config,
        /* print */TRUE, /* format */NULL, /* !accrue */FALSE);
+
+  opt_reg_int_list(odb, "-bpred:hash_sms",
+       "hash config (hash table size)",
+       hash_config, hash_nelt, &hash_nelt,
+       /* default */hash_config,
+       /* print */TRUE, /* format */NULL, /* !accrue */FALSE);
 }
 
 /* check simulator-specific option values */
@@ -285,6 +291,14 @@ sim_check_options(struct opt_odb_t *odb, int argc, char **argv)
     if (hash_nelt != 1)
       fatal("bad hash pred config (hash table size)");
     pred  = bpred_create(BPredHashSign,
+      hash_config[0],
+      0,0,0,0,0,0,0,0);
+  }
+  else if (!mystricmp(pred_type, "hashsms"))
+  {
+    if (hash_nelt != 1)
+      fatal("bad hash pred config (hash table size)");
+    pred  = bpred_create(BPredHashSMS,
       hash_config[0],
       0,0,0,0,0,0,0,0);
   }
