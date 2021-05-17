@@ -99,12 +99,14 @@
 /* branch predictor types */
 enum bpred_class
 {
-  BPredComb,     /* combined predictor (McFarling) */
-  BPred2Level,   /* 2-level correlating pred w/2-bit counters */
-  BPred2bit,     /* 2-bit saturating cntr pred (dir mapped) */
-  BPredTaken,    /* static predict taken */
-  BPredNotTaken, /* static predict not taken */
-  BPred_NUM
+  BPredComb,      /* combined predictor (McFarling) */
+  BPred2Level,    /* 2-level correlating pred w/2-bit counters */
+  BPred2bit,      /* 2-bit saturating cntr pred (dir mapped) */
+  BPredTaken,     /* static predict taken */
+  BPredNotTaken,  /* static predict not taken */
+  BPredHash01,    /* hash predictor 0/1 - Strategy 6*/
+  BPredHashSign,  /* hash predictor Sign Bit - Strategy 7*/
+  BPred_NUM,
 };
 
 /* an entry in a BTB */
@@ -136,6 +138,10 @@ struct bpred_dir_t
       int *shiftregs;         /* level-1 history table */
       unsigned char *l2table; /* level-2 prediction state table */
     } two;
+    struct {
+      int hasize; /* Hash table size */
+      unsigned char *hatable; /* prediction state table */
+    } ha;
   } config;
 };
 
@@ -148,6 +154,7 @@ struct bpred_t
     struct bpred_dir_t *bimod;  /* first direction predictor */
     struct bpred_dir_t *twolev; /* second direction predictor */
     struct bpred_dir_t *meta;   /* meta predictor */
+    struct bpred_dir_t *hash;   /* hash predictor */
   } dirpred;
 
   struct

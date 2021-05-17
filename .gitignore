@@ -1,2 +1,4 @@
 *.o
 sysprobe
+*_.c
+*_.h

@@ -112,6 +112,12 @@ bpred_create(enum bpred_class class,     /* type of predictor to create */
   case BPredNotTaken:
     /* no other state */
     break;
+  
+  /* Add new case: BPredHash */
+  case BPredHash01:
+    pred->dirpred.hash = 
+      bpred_dir_create(class, bimod_size, 0, 0, 0);
+    break;
 
   default:
     panic("bogus predictor class");
@@ -168,6 +174,15 @@ bpred_create(enum bpred_class class,     /* type of predictor to create */
   case BPredTaken:
   case BPredNotTaken:
     /* no other state */
+    break;
+
+  /* Add new case */
+  case BPredHash01:
+    if (!bimod_size || (bimod_size & (bimod_size-1)) != 0)
+      fatal("number of hash table must be non-zero and a power of two");
+    pred->btb.sets = bimod_size;
+    if (!(pred->btb.btb_data = calloc(bimod_size, sizeof(struct bpred_btb_ent_t))))
+      fatal("cannot allocate BTB");
     break;
 
   default:
@@ -253,6 +268,18 @@ bpred_dir_create(
 
     break;
 
+  /* Add Hash case*/
+  case BPredHash01:
+    if (!l1size || (l1size & (l1size-1)) != 0) {
+      fatal("table size must be non zero and a power of 2");
+    }
+    pred_dir->config.ha.hasize = l1size;
+    if (!(pred_dir->config.ha.hatable = calloc(l1size, sizeof(int)))) {
+      fatal("cannot allocate hash size table");
+    }  
+
+    break;
+
   case BPredTaken:
   case BPredNotTaken:
     /* no other state */
@@ -291,6 +318,10 @@ void bpred_dir_config(
 
   case BPredNotTaken:
     fprintf(stream, "pred_dir: %s: predict not taken\n", name);
+    break;
+
+  case BPredHash01:
+    fprintf(stream, "pred_dir: %s: predict with %d entries\n", name, pred_dir->config.ha.hasize);
     break;
 
   default:
@@ -334,6 +365,10 @@ void bpred_config(struct bpred_t *pred, /* branch predictor instance */
     bpred_dir_config(pred->dirpred.bimod, "nottaken", stream);
     break;
 
+  case BPredHash01:
+    bpred_dir_config (pred->dirpred.hash, "hash", stream);
+    break;
+
   default:
     panic("bogus branch predictor class");
   }
@@ -373,6 +408,11 @@ void bpred_reg_stats(struct bpred_t *pred,   /* branch predictor instance */
   case BPredNotTaken:
     name = "bpred_nottaken";
     break;
+  
+  case BPredHash01:
+    name = "bpred_hash_01";
+    break;
+
   default:
     panic("bogus branch predictor class");
   }
@@ -486,12 +526,16 @@ void bpred_after_priming(struct bpred_t *bpred)
   ((((ADDR) >> 19) ^ ((ADDR) >> MD_BR_SHIFT)) & ((PRED)->config.bimod.size - 1))
 /* was: ((baddr >> 16) ^ baddr) & (pred->dirpred.bimod.size-1) */
 
+#define HASH_01(ADDR, SIZE) \
+  ((ADDR >> MD_BR_SHIFT) ^ (SIZE - 1)) & (SIZE - 1)
+
 /* predicts a branch direction */
 char *                                         /* pointer to counter */
 bpred_dir_lookup(struct bpred_dir_t *pred_dir, /* branch dir predictor inst */
                  md_addr_t baddr)              /* branch address */
 {
   unsigned char *p = NULL;
+  int hash_addr;
 
   /* Except for jumps, get a pointer to direction-prediction bits */
   switch (pred_dir->class)
@@ -532,6 +576,11 @@ bpred_dir_lookup(struct bpred_dir_t *pred_dir, /* branch dir predictor inst */
     break;
   case BPredTaken:
   case BPredNotTaken:
+    break;
+
+  case BPredHash01:
+    hash_addr = HASH_01(baddr, pred_dir->config.ha.hasize);
+    p = &pred_dir->config.ha.hatable[hash_addr];
     break;
   default:
     panic("bogus branch direction predictor class");
@@ -625,6 +674,12 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
     {
       return btarget;
     }
+  /* Add new case*/
+  case BPredHash01:
+    if ((MD_OP_FLAGS(op) & (F_CTRL|F_UNCOND)) != (F_CTRL|F_UNCOND)) {
+      dir_update_ptr->pdir1 = bpred_dir_lookup(pred->dirpred.hash, baddr);
+    }
+    break;
   default:
     panic("bogus predictor class");
   }
@@ -663,27 +718,42 @@ bpred_lookup(struct bpred_t *pred,                  /* branch predictor instance
   }
 #endif /* !RAS_BUG_COMPATIBLE */
 
-  /* not a return. Get a pointer into the BTB */
-  index = (baddr >> MD_BR_SHIFT) & (pred->btb.sets - 1);
-
-  if (pred->btb.assoc > 1)
-  {
-    index *= pred->btb.assoc;
-
-    /* Now we know the set; look for a PC match */
-    for (i = index; i < (index + pred->btb.assoc); i++)
-      if (pred->btb.btb_data[i].addr == baddr)
-      {
-        /* match */
-        pbtb = &pred->btb.btb_data[i];
-        break;
-      }
-  }
-  else
-  {
-    pbtb = &pred->btb.btb_data[index];
-    if (pbtb->addr != baddr)
+  /* New condition for hash class*/
+  if (pred->class == BPredHash01){
+    index = (baddr ^ (pred->btb.sets - 1)) &(pred->btb.sets - 1);
+    /* look for a PC match*/
+    if (pred->btb.btb_data[index].addr == baddr) {
+      /* match */
+      pbtb = &pred->btb.btb_data[index];
+    } else {
       pbtb = NULL;
+    }
+
+  } else {
+    /************* origin code *****************/
+
+    /* not a return. Get a pointer into the BTB */
+    index = (baddr >> MD_BR_SHIFT) & (pred->btb.sets - 1);
+
+    if (pred->btb.assoc > 1)
+    {
+      index *= pred->btb.assoc;
+
+      /* Now we know the set; look for a PC match */
+      for (i = index; i < (index + pred->btb.assoc); i++)
+        if (pred->btb.btb_data[i].addr == baddr)
+        {
+          /* match */
+          pbtb = &pred->btb.btb_data[i];
+          break;
+        }
+    }
+    else
+    {
+      pbtb = &pred->btb.btb_data[index];
+      if (pbtb->addr != baddr)
+        pbtb = NULL;
+    }
   }
 
   /*
@@ -838,65 +908,71 @@ void bpred_update(struct bpred_t *pred,                  /* branch predictor ins
   /* find BTB entry if it's a taken branch (don't allocate for non-taken) */
   if (taken)
   {
-    index = (baddr >> MD_BR_SHIFT) & (pred->btb.sets - 1);
-
-    if (pred->btb.assoc > 1)
-    {
-      index *= pred->btb.assoc;
-
-      /* Now we know the set; look for a PC match; also identify
-	   * MRU and LRU items */
-      for (i = index; i < (index + pred->btb.assoc); i++)
-      {
-        if (pred->btb.btb_data[i].addr == baddr)
-        {
-          /* match */
-          assert(!pbtb);
-          pbtb = &pred->btb.btb_data[i];
-        }
-
-        dassert(pred->btb.btb_data[i].prev != pred->btb.btb_data[i].next);
-        if (pred->btb.btb_data[i].prev == NULL)
-        {
-          /* this is the head of the lru list, ie current MRU item */
-          dassert(lruhead == NULL);
-          lruhead = &pred->btb.btb_data[i];
-        }
-        if (pred->btb.btb_data[i].next == NULL)
-        {
-          /* this is the tail of the lru list, ie the LRU item */
-          dassert(lruitem == NULL);
-          lruitem = &pred->btb.btb_data[i];
-        }
-      }
-      dassert(lruhead && lruitem);
-
-      if (!pbtb)
-        /* missed in BTB; choose the LRU item in this set as the victim */
-        pbtb = lruitem;
-      /* else hit, and pbtb points to matching BTB entry */
-
-      /* Update LRU state: selected item, whether selected because it
-	   * matched or because it was LRU and selected as a victim, becomes 
-	   * MRU */
-      if (pbtb != lruhead)
-      {
-        /* this splices out the matched entry... */
-        if (pbtb->prev)
-          pbtb->prev->next = pbtb->next;
-        if (pbtb->next)
-          pbtb->next->prev = pbtb->prev;
-        /* ...and this puts the matched entry at the head of the list */
-        pbtb->next = lruhead;
-        pbtb->prev = NULL;
-        lruhead->prev = pbtb;
-        dassert(pbtb->prev || pbtb->next);
-        dassert(pbtb->prev != pbtb->next);
-      }
-      /* else pbtb is already MRU item; do nothing */
-    }
-    else
+    /* for hash case*/
+    if (pred->class == BPredHash01) {
+      index = (baddr ^ (pred->btb.sets - 1)) & (pred->btb.sets - 1);
       pbtb = &pred->btb.btb_data[index];
+    } else {
+      index = (baddr >> MD_BR_SHIFT) & (pred->btb.sets - 1);
+
+      if (pred->btb.assoc > 1)
+      {
+        index *= pred->btb.assoc;
+
+        /* Now we know the set; look for a PC match; also identify
+        * MRU and LRU items */
+        for (i = index; i < (index + pred->btb.assoc); i++)
+        {
+          if (pred->btb.btb_data[i].addr == baddr)
+          {
+            /* match */
+            assert(!pbtb);
+            pbtb = &pred->btb.btb_data[i];
+          }
+
+          dassert(pred->btb.btb_data[i].prev != pred->btb.btb_data[i].next);
+          if (pred->btb.btb_data[i].prev == NULL)
+          {
+            /* this is the head of the lru list, ie current MRU item */
+            dassert(lruhead == NULL);
+            lruhead = &pred->btb.btb_data[i];
+          }
+          if (pred->btb.btb_data[i].next == NULL)
+          {
+            /* this is the tail of the lru list, ie the LRU item */
+            dassert(lruitem == NULL);
+            lruitem = &pred->btb.btb_data[i];
+          }
+        }
+        dassert(lruhead && lruitem);
+
+        if (!pbtb)
+          /* missed in BTB; choose the LRU item in this set as the victim */
+          pbtb = lruitem;
+        /* else hit, and pbtb points to matching BTB entry */
+
+        /* Update LRU state: selected item, whether selected because it
+      * matched or because it was LRU and selected as a victim, becomes 
+      * MRU */
+        if (pbtb != lruhead)
+        {
+          /* this splices out the matched entry... */
+          if (pbtb->prev)
+            pbtb->prev->next = pbtb->next;
+          if (pbtb->next)
+            pbtb->next->prev = pbtb->prev;
+          /* ...and this puts the matched entry at the head of the list */
+          pbtb->next = lruhead;
+          pbtb->prev = NULL;
+          lruhead->prev = pbtb;
+          dassert(pbtb->prev || pbtb->next);
+          dassert(pbtb->prev != pbtb->next);
+        }
+        /* else pbtb is already MRU item; do nothing */
+      }
+      else
+        pbtb = &pred->btb.btb_data[index];
+    }
   }
 
   /* 
