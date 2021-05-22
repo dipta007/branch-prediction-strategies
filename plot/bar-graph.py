@@ -5,7 +5,7 @@ import seaborn as sns
 sns.set_context('paper')
 sns.set_style('darkgrid')
 
-labels = ['Strategy 6', 'Strategy 7', 'Novel Proposed Strategy']
+labels = ['Strategy 6', 'Strategy 7', 'Proposed Strategy']
 width = 0.25
 
 bar1 = [61.64, 47.41, 67.63, 62.96, 40.66, 54.58]
@@ -18,9 +18,9 @@ r2 = [x + width for x in r1]
 r3 = [x + width for x in r2]
 
 plt.figure(figsize=[25, 10])
-plt.bar(r1, bar1, width=width, edgecolor='white', label=labels[0], alpha=.8, color=plt.get_cmap('plasma').colors)
-plt.bar(r2, bar2, width=width, edgecolor='white', label=labels[1], alpha=.8)
-plt.bar(r3, bar3, width=width, edgecolor='white', label=labels[2], alpha=.8)
+plt.bar(r1, bar1[0], width=width, edgecolor='white', label=labels[0], alpha=.8, color=plt.get_cmap('plasma').colors)
+plt.bar(r2, bar2[0], width=width, edgecolor='white', label=labels[1], alpha=.8)
+plt.bar(r3, bar3[0], width=width, edgecolor='white', label=labels[2], alpha=.8)
 
 plt.xlabel('Benchmarks', fontsize=18)
 benchmarks = ['Anagram', 'Test-fmath', 'Test-llong', 'Test-lswlr', 'Test-math', 'Test-printf']
@@ -32,13 +32,13 @@ plt.grid('on')
 xlocs, _ = plt.xticks()
 print(xlocs)
 for i, v in enumerate(bar1):
-    plt.text(xlocs[i] - 0.38, v + 0.01, str(v), fontsize=16)
+    plt.text(xlocs[i] - 0.38, v + 0.01, str(v), fontsize=12)
 
 for i, v in enumerate(bar2):
-    plt.text(xlocs[i] - 0.12, v + 0.01, str(v), fontsize=16)
+    plt.text(xlocs[i] - 0.12, v + 0.01, str(v), fontsize=12)
 
 for i, v in enumerate(bar3):
-    plt.text(xlocs[i] + 0.14, v + 0.01, str(v), fontsize=16)
+    plt.text(xlocs[i] + 0.14, v + 0.01, str(v), fontsize=12)
 
 plt.title('Branch Address Prediction Rate (%)', fontsize=22)
 plt.savefig('../figure/address-prediction-rate.png')

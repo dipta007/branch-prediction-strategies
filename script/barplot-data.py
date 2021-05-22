@@ -22,4 +22,4 @@ for i, strategy in enumerate(['6', '7', 'sms'], 1):
                 direction_pred_acc = round(float(line[-7]) * 100, 2)
                 dir_out.append(direction_pred_acc)
 
-    print('bar' + str(i) + ' =', add_out)
+    print('bar' + str(i) + ' =', dir_out)
